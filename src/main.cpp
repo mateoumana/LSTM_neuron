@@ -21,13 +21,19 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, 22, 21, U8X8_PIN_NONE);//CLK; 
 #define TIME_STEPS 12
 
 void read_file(String ,int ,int ,float *);// should start with /
-uint64_t LSTM_neuron();
-float sigmoid(float);
+float LSTM_neuron();
+void dense_neuron(float *, float *, float *, const char *);
+float sigmoid(float *);
 
-String entrada;
-float dense_weights[TIME_STEPS + 1][1] = {0};//+ 1 por el h_(t-1)
-float sesgo = 0;
-float y = 0;
+float dense_f_weights[1][TIME_STEPS + 1] = {0};//+ 1 por el sesgo
+float dense_i_weights[1][TIME_STEPS + 1] = {0};
+float dense_C_weights[1][TIME_STEPS + 1] = {0};
+float dense_o_weights[1][TIME_STEPS + 1] = {0};
+float sesgo = 0; float C_t_1 = 0;
+float C_t = 0;   float h_t = 0;
+float h_t_1 = 0; float x_t[1][TIME_STEPS + 1] = {0};//para incluir h_t_1
+float f_t = 0;   float i_t = 0;
+float o_t = 0;   float _C_t = 0;//~C_t
 
 
 void setup() {
@@ -47,22 +53,20 @@ void setup() {
   Serial.printf("Total space used: %d\n",LittleFS.usedBytes());
   Serial.println("========================\n");
 
-  // read_file("/capa_embedding.txt",EMB_DIM,VOCAB_SIZE,(float *)emb);
-  // read_file("/capa_dense.txt",1,MAX_ENT*EMB_DIM+1,(float *)dense_weights);
-  sesgo = dense_weights[0][0]; //el primer dato es el sesgo
+  read_file("/weights_dense_f.txt",1,TIME_STEPS,(float *)(dense_f_weights + 1));//el primer espacio es para h_t_1
+  read_file("/weights_dense_i.txt",1,TIME_STEPS,(float *)(dense_i_weights + 1));
+  read_file("/weights_dense_C.txt",1,TIME_STEPS,(float *)(dense_C_weights + 1));
+  read_file("/weights_dense_o.txt",1,TIME_STEPS,(float *)(dense_o_weights + 1));
+  sesgo = dense_f_weights[0][0]; //el primer dato es el sesgo
   delay(1000); 
 }
 
 
 void loop() {
   if (Serial.available()){ 
-    //Ejecucion del modelo
-    y = 0;
-    y += sesgo;//salida capa densa
-    y = sigmoid(y); //paso por función de activación
-    Serial.printf("Probabilidad: %.8f\n",y);
-    u8g2.drawStr(15,55,"Probabilidad:");
-    u8g2.setCursor(95, 55); u8g2.print(String(y));
+    Serial.printf("h_t: %.8f\n",h_t);
+    u8g2.drawStr(15,55,"h_t:");
+    u8g2.setCursor(95, 55); u8g2.print(String(h_t));
     u8g2.sendBuffer();
   }
 }
@@ -91,10 +95,31 @@ void read_file(String path, int size_x, int size_y, float *matriz){
   }
 }
 
-uint64_t LSTM_neuron(){
-
+float LSTM_neuron(){
+  //Ejecucion del modelo
+  x_t[1][0] = h_t_1;//se añade h_t_1 a la entrada general
+  dense_neuron((float *)dense_f_weights, (float *)x_t, &f_t, "sigmoid"); //calculo de f_t
+  dense_neuron((float *)dense_i_weights, (float *)x_t, &_C_t, "sigmoid"); //calculo de i_t
+  dense_neuron((float *)dense_C_weights, (float *)x_t, &i_t, "tanh");    //calculo de _C_t
+  dense_neuron((float *)dense_o_weights, (float *)x_t, &o_t, "sigmoid"); //calculo de o_t
+  C_t = f_t*C_t_1 + i_t*_C_t;
+  h_t = tanh(C_t)*o_t;
+  h_t_1 = h_t;//guardar el valor anterior
+  C_t_1 = C_t;
 }
 
-float sigmoid(float z) {
-  return 1.0 / (1.0 + exp(-z));
+void dense_neuron(float *wieghts, float *ints, float *result, const char *func_act){
+  for(int i = 0; i < TIME_STEPS; i++){
+    *result += *(wieghts + i) * *(ints + i);
+  }
+  *result += *(wieghts + TIME_STEPS + 1);//se suma el sesgo
+  if(strcmp(func_act, "sigmoid") == 0){
+    *result += sigmoid(result);//se aplica la funcion de activacion
+  }else if(strcmp(func_act, "tanh") == 0){
+    *result += tanh(*result);//se aplica la funcion de activacion
+  }
+}
+
+float sigmoid(float *z) {
+  return 1.0 / (1.0 + exp(-*z));
 }
