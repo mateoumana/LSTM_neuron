@@ -21,7 +21,7 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, 22, 21, U8X8_PIN_NONE);//CLK; 
 #define TIME_STEPS 12
 
 void read_file(String ,int ,int ,float *);// should start with /
-float LSTM_neuron();
+float LSTM_neuron(float *, float *, float *, float *, float *, float *, float *, float *, float *);
 void dense_neuron(float *, float *, float *, const char *);
 float sigmoid(float *);
 
@@ -29,11 +29,8 @@ float dense_f_weights[1][TIME_STEPS + 1] = {0};//+ 1 por el sesgo
 float dense_i_weights[1][TIME_STEPS + 1] = {0};
 float dense_C_weights[1][TIME_STEPS + 1] = {0};
 float dense_o_weights[1][TIME_STEPS + 1] = {0};
-float sesgo = 0; float C_t_1 = 0;
-float C_t = 0;   float h_t = 0;
-float h_t_1 = 0; float x_t[1][TIME_STEPS + 1] = {0};//para incluir h_t_1
-float f_t = 0;   float i_t = 0;
-float o_t = 0;   float _C_t = 0;//~C_t
+float sesgo = 0; 
+float x_t[1][TIME_STEPS + 1] = {0};//para incluir h_t_1
 
 
 void setup() {
@@ -64,6 +61,13 @@ void setup() {
 
 void loop() {
   if (Serial.available()){ 
+    float C_t_1 = 0; float C_t = 0;   
+    float h_t = 0; float h_t_1 = 0; 
+    LSTM_neuron((float *)(dense_f_weights + 1),
+                (float *)(dense_C_weights + 1),
+                (float *)(dense_i_weights + 1),
+                (float *)(dense_o_weights + 1),
+                (float *)(x_t));
     Serial.printf("h_t: %.8f\n",h_t);
     u8g2.drawStr(15,55,"h_t:");
     u8g2.setCursor(95, 55); u8g2.print(String(h_t));
@@ -95,17 +99,20 @@ void read_file(String path, int size_x, int size_y, float *matriz){
   }
 }
 
-float LSTM_neuron(){
+float LSTM_neuron(float *f_weights, float *C_weights, float *i_weights, float *o_weights, 
+                  float *x, float *h_t, float *h_t_1, float *C_t, float *C_t_1){
+  float f_t = 0;   float i_t = 0;
+  float o_t = 0;   float _C_t = 0;//~C_t
   //Ejecucion del modelo
-  x_t[1][0] = h_t_1;//se añade h_t_1 a la entrada general
-  dense_neuron((float *)dense_f_weights, (float *)x_t, &f_t, "sigmoid"); //calculo de f_t
-  dense_neuron((float *)dense_i_weights, (float *)x_t, &_C_t, "sigmoid"); //calculo de i_t
-  dense_neuron((float *)dense_C_weights, (float *)x_t, &i_t, "tanh");    //calculo de _C_t
-  dense_neuron((float *)dense_o_weights, (float *)x_t, &o_t, "sigmoid"); //calculo de o_t
-  C_t = f_t*C_t_1 + i_t*_C_t;
-  h_t = tanh(C_t)*o_t;
-  h_t_1 = h_t;//guardar el valor anterior
-  C_t_1 = C_t;
+  *(x + 1) = *h_t_1;//se añade h_t_1 a la entrada general, al inicio
+  dense_neuron((float *)(dense_f_weights + 1), (float *)x_t, &f_t, "sigmoid"); //calculo de f_t
+  dense_neuron((float *)(dense_C_weights + 1), (float *)x_t, &_C_t, "sigmoid"); //calculo de i_t
+  dense_neuron((float *)(dense_i_weights + 1), (float *)x_t, &i_t, "tanh");    //calculo de _C_t
+  dense_neuron((float *)(dense_o_weights + 1), (float *)x_t, &o_t, "sigmoid"); //calculo de o_t
+  *C_t = f_t*(*C_t_1) + i_t*_C_t;
+  *h_t = tanh(*C_t)*o_t;
+  *h_t_1 = *h_t;//guardar el valor anterior
+  *C_t_1 = *C_t;
 }
 
 void dense_neuron(float *wieghts, float *ints, float *result, const char *func_act){
