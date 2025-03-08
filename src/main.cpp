@@ -30,6 +30,9 @@ float dense_f_weights[1][TIME_STEPS + 1] = {0};//+ 1 por el sesgo
 float dense_i_weights[1][TIME_STEPS + 1] = {0};
 float dense_C_weights[1][TIME_STEPS + 1] = {0};
 float dense_o_weights[1][TIME_STEPS + 1] = {0};
+float C_t = 0; float C_t_1 = 0;
+float h_t = 0; float h_t_1 = 0;
+float x_t[1][TIME_STEPS] = {0};//entradas
 //recorrer matrices con punteros: *(matriz + i * columnas + j) = matriz[i][j]
 
 void setup() {
@@ -59,9 +62,6 @@ void setup() {
 
 void loop() {
   if (Serial.available()){ //presionar enter para ejecutar la neurona
-    float C_t = 0; float C_t_1 = 0;//segun la red estos valores se definen en otro lugar, por ahora es solo para una ejecución
-    float h_t = 0; float h_t_1 = 0;
-    float x_t[1][TIME_STEPS] = {0};//entradas
     LSTM_neuron((float *)(dense_f_weights),//se pasa todo el vector y en la funcion se separa el sesgo
                 (float *)(dense_C_weights),
                 (float *)(dense_i_weights),
@@ -99,19 +99,19 @@ void read_file(String path, int size_x, int size_y, float *matriz){
 }
 
 float LSTM_neuron(float *f_weights, float *C_weights, float *i_weights, float *o_weights, 
-                  float *x, float *h_t, float *h_t_1, float *C_t, float *C_t_1){
+                  float *x, float *h, float *h_1, float *C, float *C_1){
   float f_t = 0;   float i_t = 0;
   float o_t = 0;   float _C_t = 0;//~C_t
   //Ejecucion del modelo
-  *(x + 0) = *h_t_1;//se añade h_t_1 a la entrada general, al inicio
+  *(x + 0) = *h_1;//se añade h_t_1 a la entrada general, al inicio
   dense_neuron((float *)(dense_f_weights), (float *)x, &f_t, "sigmoid"); //calculo de f_t
   dense_neuron((float *)(dense_C_weights), (float *)x, &_C_t, "sigmoid"); //calculo de i_t
   dense_neuron((float *)(dense_i_weights), (float *)x, &i_t, "tanh");    //calculo de _C_t
   dense_neuron((float *)(dense_o_weights), (float *)x, &o_t, "sigmoid"); //calculo de o_t
-  *C_t = f_t*(*C_t_1) + i_t*_C_t;
-  *h_t = tanh(*C_t)*o_t;
-  *h_t_1 = *h_t;//guardar el valor anterior
-  *C_t_1 = *C_t;
+  *C = f_t*(*C_1) + i_t*_C_t;
+  *h = tanh(*C)*o_t;
+  *h_1 = *h;//guardar el valor anterior
+  *C_1 = *C;
 }
 
 void dense_neuron(float *weights, float *intput, float *result, const char *func_act){
