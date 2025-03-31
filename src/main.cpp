@@ -28,17 +28,17 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, 22, 21, U8X8_PIN_NONE);//CLK; 
 #define DENSE_UNITS 4
 
 void read_file(String ,int ,int ,float *);
-uint64_t hash1(String);
+uint64_t hash1(const char *);
 uint64_t hash2(uint64_t);
-void padded_right(uint8_t *, char *, int);
-void onehot(float *, uint8_t *);
+void padded_right(uint16_t *, char *, int);
+void onehot(float *, uint16_t *);
 void LSTM_neuron(float *, float *, float *, float *, float *, float *);
 void dense_neuron(float *, float *, float *, float *, const char *);
 void multMatriz(float *, uint16_t, uint16_t, float *, uint16_t, float *);
-float sigmoid(float *);
+float sigmoid(float);
 
 String entrada;
-uint8_t ent_encoded[MAX_ENT] = {0};
+uint16_t ent_encoded[MAX_ENT] = {0};
 float output_emb[MAX_ENT][EMB_DIM] = {0};
 float ent_encod_onehot[MAX_ENT][VOCAB_SIZE] = {0};
 float h_t_LSTM[LSTM_UNITS][4*LSTM_UNITS] = {0};//no cabe en malloc
@@ -67,7 +67,7 @@ void setup() {
   Serial.printf("Total space: %d\n",LittleFS.totalBytes());
   Serial.printf("Total space used: %d\n",LittleFS.usedBytes());
   Serial.println("========================\n");
-  //read_file("/h_t_lstm.bin",LSTM_UNITS,4*LSTM_UNITS,(float *)(h_t_LSTM));
+  read_file("/h_t_lstm.bin",LSTM_UNITS,4*LSTM_UNITS,(float *)(h_t_LSTM));
   delay(1000); 
 }
 
@@ -77,9 +77,9 @@ void loop() {
     entrada.toLowerCase();
     Serial.print("Recibido: "); Serial.println(entrada);
 
-    padded_right((uint8_t *) ent_encoded, (char *)entrada.c_str(), MAX_ENT);
-    onehot((float *)ent_encod_onehot, (uint8_t *)ent_encoded);
-
+    padded_right((uint16_t *)ent_encoded, (char *)entrada.c_str(), MAX_ENT);
+    onehot((float *)ent_encod_onehot, (uint16_t *)ent_encoded);
+    
     //void multMatriz(float *mat1, uint16_t sizex1_y2, uint16_t sizey1, float *mat2, uint16_t sizex2, float *result)
     float* emb = (float*)malloc(VOCAB_SIZE * EMB_DIM * sizeof(float));//leer directamente la matriz de la flash
     read_file("/capa_embedding.bin",VOCAB_SIZE,EMB_DIM,emb);// should start with /
@@ -87,9 +87,9 @@ void loop() {
     free(emb);
 
     float* capa_LSTM = (float*)malloc(EMB_DIM * 4 * LSTM_UNITS * sizeof(float));
-    float* sesgos_LSTM = (float*)malloc(1 * LSTM_UNITS * sizeof(float));
+    float* sesgos_LSTM = (float*)malloc(4 * LSTM_UNITS * sizeof(float));
     read_file("/lstm.bin",EMB_DIM,4*LSTM_UNITS,capa_LSTM);
-    read_file("/sesgos_lstm.bin",1,LSTM_UNITS,sesgos_LSTM);
+    read_file("/sesgos_lstm.bin",1,4*LSTM_UNITS,sesgos_LSTM);
     LSTM_neuron((float *)(capa_LSTM),//Capa LSTM
                 (float *)(h_t_LSTM), (float *)(sesgos_LSTM),
                 (float *)(output_emb), (float *)(h_t), (float *)(C_t));
@@ -99,18 +99,22 @@ void loop() {
     float* capa_densa = (float*)malloc(LSTM_UNITS * DENSE_UNITS * sizeof(float));
     read_file("/sesgos_densa.bin",1,DENSE_UNITS,sesgos_dense);
     read_file("/capa_densa.bin",LSTM_UNITS,DENSE_UNITS,capa_densa);
-    dense_neuron((float *)(capa_densa),(float *)(sesgos_dense),(float *)(h_t),(float *)(yout),"sigmoid");
-    dense_neuron((float *)(capa_densa + LSTM_UNITS),(float *)(sesgos_dense+1),(float *)(h_t),(float *)(yout+1),"sigmoid");
-    dense_neuron((float *)(capa_densa + 2*LSTM_UNITS),(float *)(sesgos_dense+2),(float *)(h_t),(float *)(yout+2),"sigmoid");
-    dense_neuron((float *)(capa_densa + 3*LSTM_UNITS),(float *)(sesgos_dense+3),(float *)(h_t),(float *)(yout+3),"sigmoid");
+    for(int j = 0; j < DENSE_UNITS; j++){//Capa densa
+      dense_neuron((float *)(capa_densa + j*LSTM_UNITS),(float *)(sesgos_dense+j),(float *)(h_t),&yout[0][j],"sigmoid");
+    }
     free(capa_densa); free(sesgos_dense);
 
-    Serial.printf("yout: %.8f",*(yout));
-    Serial.printf(", %.8f",*(yout+1));
-    Serial.printf(", %.8f",*(yout+2));
-    Serial.printf(", %.8f\n",*(yout+3));
-    u8g2.drawStr(15,55,"yout:");
-    u8g2.setCursor(55, 55); u8g2.print(String(yout[0][0]));
+    for(int j = 0; j < DENSE_UNITS; j++){
+      Serial.printf("yout[%d] = %.5f ", j, yout[0][j]);
+    }
+    Serial.println(); 
+    u8g2.clearBuffer();
+    u8g2.drawStr(15,25,"feliz:");u8g2.drawStr(15,35,"triste:");
+    u8g2.drawStr(15,45,"aburi:");u8g2.drawStr(15,55,"brav:");
+    u8g2.setCursor(55, 25); u8g2.print(String(yout[0][0],6));
+    u8g2.setCursor(55, 35); u8g2.print(String(yout[0][1],6));
+    u8g2.setCursor(55, 45); u8g2.print(String(yout[0][2],6));
+    u8g2.setCursor(55, 55); u8g2.print(String(yout[0][3],6));
     u8g2.sendBuffer();
   }
 }
@@ -137,42 +141,41 @@ void read_file(String path, int size_x, int size_y, float *matriz){
   }*/
 }
 
-uint64_t hash1(char *str){
+uint64_t hash1(const char *str){
   uint64_t hash = 7919;
-  uint8_t c;
+  int c;
   int i = 0;
   while ((c = *(str +i))) {
+    if ((c != '\0') && (c != '\n') && (c != '\r')){
       hash = ((hash << 5) + hash) + c;
-      i+=1;
+    } 
+    i+=1;//fuera del if para asegurar que sale del bucle
   }
-  printf("I: %d\n",i);
-  printf("xx%d\n",hash);
   return hash;
 }
 
 uint64_t hash2(uint64_t hash){
-  printf("xx%d\n",hash * 65599);
-  printf("xx%d\n",hash * 65599 % VOCAB_SIZE);
   return hash * 65599; //otro numero primo grande se necesita un int de 64bits, si no trunca el resultado
 }
 
-void padded_right(uint8_t *in_encoded, char *input, int max_ent){
+void padded_right(uint16_t *in_encoded, char *input, int max_ent){
   char *token[MAX_ENT]; uint8_t i = 0;
-  token[0] = strtok(input, " ");
-  do{  
-    printf("token: %s.\n", token[i]);
+  while ((token[i] = strtok_r(input, " ", &input))) {  
+    printf("token: %s\n", token[i]);
     i++;
-  }while (token[i] = strtok(NULL, " "));
+  }
   for(uint8_t j = 0; j < MAX_ENT; j++){
     *(in_encoded + j) = (j < (MAX_ENT-i)) ? 0 : hash2(hash1(token[j - (MAX_ENT - i)])) % VOCAB_SIZE; //se hace el padded a la derecha
+    printf(" %d ", *(in_encoded + j));
   }
+  printf("= padded\n");
 }
 
-void onehot(float *one_hot, uint8_t *in_encoded){
+void onehot(float *one_hot, uint16_t *in_encoded){
   memset(one_hot, 0, sizeof(one_hot));//reiniciar la matriz
   for(int i = 0; i < MAX_ENT; i++){
     //ent_encod_onehot[i][ent_encoded[i]] = 1;
-    *(one_hot + i*MAX_ENT + *(in_encoded + i)) = 1;
+    *(one_hot + i*VOCAB_SIZE + *(in_encoded + i)) = 1;
   }
 }
 
@@ -181,6 +184,11 @@ void LSTM_neuron(float *weights, float *h_t_weights, float *sesgos, float *x, fl
   float o_t = 0;   float _C_t = 0;//~C_t
   float z1[1][4*LSTM_UNITS] = {0};
   float z2[1][4*LSTM_UNITS] = {0};
+  // Inicializar C y h a cero al comenzar
+  for(int j = 0; j < LSTM_UNITS; j++){
+    *(C + j) = 0.0;
+    *(h + j) = 0.0;
+  }
   //Ejecucion del modelo
   for(int i = 0; i < MAX_ENT; i++){
     multMatriz((x + i*EMB_DIM),EMB_DIM,1,weights,4*LSTM_UNITS,(float *)z1);
@@ -189,10 +197,10 @@ void LSTM_neuron(float *weights, float *h_t_weights, float *sesgos, float *x, fl
       z2[0][j] += z1[0][j] + *(sesgos + j);//output compuertas LSTM
     }
     for(int j = 0; j < LSTM_UNITS; j++){
-      i_t = sigmoid((float *)(z2 + j));//calculo de i_t
-      f_t = sigmoid((float *)(z2 + LSTM_UNITS + j));//calculo de f_t
-      _C_t = tanh(z2[1][2*LSTM_UNITS + j]);//calculo de _C_t
-      o_t = sigmoid((float *)(z2 + 3*LSTM_UNITS + j));//calculo de o_t
+      i_t = sigmoid(z2[0][j]);//calculo de i_t
+      f_t = sigmoid(z2[0][LSTM_UNITS + j]);//calculo de f_t
+      _C_t = tanh(z2[0][2*LSTM_UNITS + j]);//calculo de _C_t
+      o_t = sigmoid(z2[0][3*LSTM_UNITS + j]);//calculo de o_t
       *(C + j) = f_t*(*(C + j)) + i_t*_C_t;
       *(h + j) = tanh(*(C + j))*o_t;
     }
@@ -200,12 +208,13 @@ void LSTM_neuron(float *weights, float *h_t_weights, float *sesgos, float *x, fl
 }
 
 void dense_neuron(float *weights, float *sesgo, float *intput, float *result, const char *func_act){
+  *result = 0;//reiniciar
   for(int i = 0; i < LSTM_UNITS; i++){
-    *result += *(weights + i + 1) * *(intput + i); //weights + 1 para evadir el sesgo
+    *result += *(weights + i) * *(intput + i);
   }
-  *result += *(sesgo);//se suma el sesgo (primera posición)
+  *result += *sesgo;//se suma el sesgo (primera posición)
   if(strcmp(func_act, "sigmoid") == 0){
-    *result = sigmoid(result);//se aplica la funcion de activacion
+    *result = sigmoid(*result);//se aplica la funcion de activacion
   }else if(strcmp(func_act, "tanh") == 0){
     *result = tanh(*result);  //se aplica la funcion de activacion
   }
@@ -222,6 +231,6 @@ void multMatriz(float *mat1, uint16_t sizex1_y2, uint16_t sizey1, float *mat2, u
   }
 }
 
-float sigmoid(float *z) {
-  return 1.0 / (1.0 + exp(-*z));
+float sigmoid(float z) {
+  return 1.0 / (1.0 + exp(-z));  
 }
