@@ -75,17 +75,21 @@ void loop() {
   if (Serial.available()){ //ingresar frase
     entrada = Serial.readStringUntil('\n').c_str();  // Lee todo el String recibido
     entrada.toLowerCase();
-    Serial.print("Recibido: "); Serial.println(entrada);
+    Serial.print("\nRecibido: "); Serial.println(entrada);
 
     padded_right((uint16_t *)ent_encoded, (char *)entrada.c_str(), MAX_ENT);
     onehot((float *)ent_encod_onehot, (uint16_t *)ent_encoded);
     
-    //void multMatriz(float *mat1, uint16_t sizex1_y2, uint16_t sizey1, float *mat2, uint16_t sizex2, float *result)
     float* emb = (float*)malloc(VOCAB_SIZE * EMB_DIM * sizeof(float));//leer directamente la matriz de la flash
     read_file("/capa_embedding.bin",VOCAB_SIZE,EMB_DIM,emb);// should start with /
     multMatriz((float *)ent_encod_onehot,VOCAB_SIZE, MAX_ENT, emb, EMB_DIM, (float *)output_emb);//capa embedding
     free(emb);
-
+    for(int i = 0; i < MAX_ENT; i++){
+      for(int j = 0; j < EMB_DIM; j++){
+        Serial.printf("%.5f ", output_emb[i][j]);
+      }Serial.println(); 
+    }
+    Serial.println(); 
     float* capa_LSTM = (float*)malloc(EMB_DIM * 4 * LSTM_UNITS * sizeof(float));
     float* sesgos_LSTM = (float*)malloc(4 * LSTM_UNITS * sizeof(float));
     read_file("/lstm.bin",EMB_DIM,4*LSTM_UNITS,capa_LSTM);
@@ -100,7 +104,7 @@ void loop() {
     read_file("/sesgos_densa.bin",1,DENSE_UNITS,sesgos_dense);
     read_file("/capa_densa.bin",LSTM_UNITS,DENSE_UNITS,capa_densa);
     for(int j = 0; j < DENSE_UNITS; j++){//Capa densa
-      dense_neuron((float *)(capa_densa + j*LSTM_UNITS),(float *)(sesgos_dense+j),(float *)(h_t),&yout[0][j],"sigmoid");
+      dense_neuron((float *)(capa_densa + j),(float *)(sesgos_dense+j),(float *)(h_t),&yout[0][j],"sigmoid");
     }
     free(capa_densa); free(sesgos_dense);
 
@@ -172,7 +176,7 @@ void padded_right(uint16_t *in_encoded, char *input, int max_ent){
 }
 
 void onehot(float *one_hot, uint16_t *in_encoded){
-  memset(one_hot, 0, sizeof(one_hot));//reiniciar la matriz
+  memset(one_hot, 0, MAX_ENT*VOCAB_SIZE*sizeof(one_hot));//reiniciar la matriz
   for(int i = 0; i < MAX_ENT; i++){
     //ent_encod_onehot[i][ent_encoded[i]] = 1;
     *(one_hot + i*VOCAB_SIZE + *(in_encoded + i)) = 1;
@@ -208,11 +212,10 @@ void LSTM_neuron(float *weights, float *h_t_weights, float *sesgos, float *x, fl
 }
 
 void dense_neuron(float *weights, float *sesgo, float *intput, float *result, const char *func_act){
-  *result = 0;//reiniciar
+  *result = *sesgo;//reiniciar, se suma el sesgo
   for(int i = 0; i < LSTM_UNITS; i++){
-    *result += *(weights + i) * *(intput + i);
+    *result += *(weights + i*DENSE_UNITS) * *(intput + i);//*DENSE_UNITS es para acceder de columna en columna de la capa densa
   }
-  *result += *sesgo;//se suma el sesgo (primera posición)
   if(strcmp(func_act, "sigmoid") == 0){
     *result = sigmoid(*result);//se aplica la funcion de activacion
   }else if(strcmp(func_act, "tanh") == 0){
